@@ -1,11 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="transparent">#00000000</color>
     <color name="glass_dark">#66000000</color>
-    <color name="glass_light">#30FFFFFF</color>
     <color name="accent_green">#6EE7B7</color>
-    <color name="accent_blue">#7DD3FC</color>
     <color name="text_primary">#F5F5F5</color>
-    <color name="text_secondary">#E0E0E0</color>
-    <color name="track_item_bg">#1A1A1A</color>
+    <color name="text_secondary">#D5D5D5</color>
 </resources>

@@ -4,7 +4,10 @@
     android:layout_height="match_parent"
     android:background="@android:color/transparent"
     android:orientation="vertical"
-    android:padding="18dp">
+    android:paddingStart="18dp"
+    android:paddingTop="24dp"
+    android:paddingEnd="18dp"
+    android:paddingBottom="24dp">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -18,11 +21,10 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:ellipsize="marquee"
-            android:focusable="true"
             android:gravity="center"
             android:marqueeRepeatLimit="marquee_forever"
             android:singleLine="true"
-            android:text="Melan Music"
+            android:text="No Track"
             android:textColor="#F5F5F5"
             android:textSize="24sp"
             android:textStyle="bold" />
@@ -33,14 +35,14 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:gravity="center"
-            android:text="Local track"
-            android:textColor="#D9D9D9"
-            android:textSize="14sp" />
+            android:text="Melan Music"
+            android:textColor="#D5D5D5"
+            android:textSize="13sp" />
     </LinearLayout>
 
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="260dp"
+        android:layout_height="280dp"
         android:layout_marginTop="18dp"
         android:background="@drawable/bg_glass_panel">
 
@@ -50,7 +52,7 @@
             android:layout_gravity="center"
             android:text="♪"
             android:textColor="#6EE7B7"
-            android:textSize="72sp" />
+            android:textSize="88sp" />
     </FrameLayout>
 
     <LinearLayout
@@ -59,7 +61,7 @@
         android:layout_marginTop="18dp"
         android:background="@drawable/bg_glass_panel"
         android:orientation="vertical"
-        android:padding="18dp">
+        android:padding="16dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -73,7 +75,7 @@
                 android:layout_weight="1"
                 android:text="00:00"
                 android:textColor="#F5F5F5"
-                android:textSize="12sp" />
+                android:textSize="11sp" />
 
             <TextView
                 android:id="@+id/totalTimeText"
@@ -81,7 +83,7 @@
                 android:layout_height="wrap_content"
                 android:text="00:00"
                 android:textColor="#F5F5F5"
-                android:textSize="12sp" />
+                android:textSize="11sp" />
         </LinearLayout>
 
         <SeekBar
@@ -89,8 +91,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:maxHeight="3dp"
-            android:minHeight="3dp"
+            android:maxHeight="2dp"
+            android:minHeight="2dp"
             android:progressTint="#6EE7B7"
             android:thumbTint="#6EE7B7" />
     </LinearLayout>
@@ -98,63 +100,49 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
+        android:layout_marginTop="22dp"
         android:gravity="center"
         android:orientation="horizontal">
 
         <ImageButton
             android:id="@+id/shuffleButton"
-            android:layout_width="52dp"
-            android:layout_height="52dp"
-            android:layout_marginEnd="14dp"
-            android:background="@android:color/transparent"
-            android:src="@drawable/ic_shuffle"
-            android:tint="#FFFFFF" />
+            style="@style/PlayerIconButton"
+            android:src="@drawable/ic_shuffle" />
 
         <ImageButton
             android:id="@+id/prevButton"
-            android:layout_width="62dp"
-            android:layout_height="62dp"
-            android:background="@android:color/transparent"
-            android:src="@drawable/ic_prev"
-            android:tint="#FFFFFF" />
+            style="@style/PlayerIconButton"
+            android:src="@drawable/ic_prev" />
 
         <ImageButton
             android:id="@+id/playPauseButton"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:layout_marginHorizontal="18dp"
+            android:layout_width="76dp"
+            android:layout_height="76dp"
+            android:layout_marginHorizontal="16dp"
             android:background="@drawable/bg_glass_panel"
             android:src="@drawable/ic_play"
             android:tint="#6EE7B7" />
 
         <ImageButton
             android:id="@+id/nextButton"
-            android:layout_width="62dp"
-            android:layout_height="62dp"
-            android:background="@android:color/transparent"
-            android:src="@drawable/ic_next"
-            android:tint="#FFFFFF" />
+            style="@style/PlayerIconButton"
+            android:src="@drawable/ic_next" />
 
         <ImageButton
             android:id="@+id/repeatButton"
-            android:layout_width="52dp"
-            android:layout_height="52dp"
-            android:layout_marginStart="14dp"
-            android:background="@android:color/transparent"
-            android:src="@drawable/ic_repeat"
-            android:tint="#FFFFFF" />
+            style="@style/PlayerIconButton"
+            android:src="@drawable/ic_repeat" />
     </LinearLayout>
 
     <ListView
         android:id="@+id/playlistView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="18dp"
+        android:layout_marginTop="20dp"
         android:layout_weight="1"
         android:background="@drawable/bg_glass_panel"
         android:divider="#33FFFFFF"
         android:dividerHeight="1dp"
-        android:padding="8dp" />
+        android:padding="10dp" />
 
 </LinearLayout>
