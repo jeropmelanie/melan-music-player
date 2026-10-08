@@ -1,14 +1,10 @@
 package com.example.melanmusicplayer;
 
-import android.Manifest;
-import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
 import android.widget.ArrayAdapter;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -17,28 +13,28 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
 import androidx.core.graphics.drawable.RoundedBitmapDrawable;
 import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory;
 import androidx.core.view.WindowCompat;
 
+import com.example.melanmusicplayer.player.PlayerController;
+import com.example.melanmusicplayer.repository.SongRepository;
+import com.example.melanmusicplayer.service.MusicService;
+import com.example.melanmusicplayer.util.FavoritesStore;
+import com.example.melanmusicplayer.util.QueueStore;
+
 import java.util.ArrayList;
 import java.util.Locale;
 
-public class MainActivity extends AppCompatActivity implements MusicPlayerCore.PlayerListener {
-
-    private static final int REQ_STORAGE = 101;
-    private static final String TAG = "MelanMusicPlayer";
+public class MainActivity extends AppCompatActivity implements MusicService.PlaybackListener {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable progressUpdater = new Runnable() {
         @Override
         public void run() {
-            if (playerCore != null && playerCore.isPlaying()) {
-                int pos = playerCore.getCurrentPosition();
+            if (playerController != null && playerController.isPlaying()) {
+                int pos = playerController.getCurrentPosition();
                 if (!isUserSeeking) {
                     seekBar.setProgress(pos);
                     currentTimeText.setText(formatTime(pos));
@@ -48,11 +44,13 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
         }
     };
 
-    private MusicPlayerCore playerCore;
-    private PlaylistManager playlistManager;
-    private QueueManager queueManager;
-    private FavoritesManager favoritesManager;
-    private MusicScanner scanner;
+    private PlayerController playerController;
+    private SongRepository songRepository;
+    private FavoritesStore favoritesStore;
+    private QueueStore queueStore;
+    private ArrayList<SongRepository.Song> songs = new ArrayList<>();
+    private ArrayList<SongRepository.Song> queue = new ArrayList<>();
+    private int currentIndex = 0;
 
     private ListView playlistView;
     private SeekBar seekBar;
@@ -69,8 +67,9 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
     private ImageButton repeatButton;
     private ImageButton favoriteButton;
 
-    private ArrayAdapter<String> playlistAdapter;
     private boolean isUserSeeking = false;
+    private boolean shuffleEnabled = false;
+    private boolean repeatEnabled = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -81,22 +80,28 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
         getWindow().setStatusBarColor(Color.TRANSPARENT);
         getWindow().setNavigationBarColor(Color.TRANSPARENT);
 
-        playerCore = new MusicPlayerCore();
-        playerCore.setListener(this);
-        playlistManager = new PlaylistManager();
-        queueManager = new QueueManager();
-        favoritesManager = new FavoritesManager();
-        scanner = new MusicScanner(this);
+        playerController = new PlayerController(this);
+        songRepository = new SongRepository(this);
+        favoritesStore = new FavoritesStore(this);
+        queueStore = new QueueStore(this);
 
         bindViews();
         setupListeners();
-        attachCompletionListener();
+        playerController.setPlaybackListener(this);
 
-        if (hasStoragePermission()) {
-            loadMusicLibrary();
-        } else {
-            requestStoragePermission();
-        }
+        new Thread(() -> {
+            songs = songRepository.getAllSongs();
+            runOnUiThread(() -> {
+                if (songs.isEmpty()) {
+                    Toast.makeText(this, "No songs found in your music library.", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                queue.clear();
+                queue.addAll(songs);
+                updatePlaylistUI();
+                playSong(queue.get(0));
+            });
+        }).start();
     }
 
     private void bindViews() {
@@ -119,26 +124,6 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
         volumeSlider.setProgress(10);
     }
 
-    private void attachCompletionListener() {
-        playerCore.setOnCompletionListener(mp -> {
-            if (playlistManager.isRepeatEnabled()) {
-                playCurrentSong();
-                return;
-            }
-
-            if (queueManager.getQueue().isEmpty()) {
-                playerCore.pause();
-                playPauseButton.setImageResource(R.drawable.ic_play);
-                return;
-            }
-
-            MusicScanner.Song nextSong = playlistManager.getNext();
-            if (nextSong != null) {
-                playCurrentSong();
-            }
-        });
-    }
-
     private void setupListeners() {
         playPauseButton.setOnClickListener(v -> togglePlayPause());
         nextButton.setOnClickListener(v -> playNext());
@@ -151,7 +136,7 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
-                    playerCore.seek(progress);
+                    playerController.seek(progress);
                     currentTimeText.setText(formatTime(progress));
                 }
             }
@@ -161,56 +146,32 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
         });
 
         volumeSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (playerCore != null) {
-                    float volume = progress / 15f;
-                    playerCore.setVolume(volume, volume);
-                }
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float volume = progress / 15f;
+                playerController.setVolume(volume);
             }
-
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
 
         playlistView.setOnItemClickListener((parent, view, position, id) -> {
-            playlistManager.setSongAt(position);
-            playCurrentSong();
+            currentIndex = position;
+            playSong(queue.get(position));
         });
     }
 
-    private void loadMusicLibrary() {
-        new Thread(() -> {
-            ArrayList<MusicScanner.Song> songs = scanner.scanMusicFiles();
-            runOnUiThread(() -> {
-                if (songs.isEmpty()) {
-                    Toast.makeText(this, "No music files found in Music folder.", Toast.LENGTH_LONG).show();
-                    return;
-                }
-
-                playlistManager.setPlaylist(songs);
-                queueManager.setQueue(songs);
-                updatePlaylistList();
-                playCurrentSong();
-            });
-        }).start();
-    }
-
-    private void updatePlaylistList() {
+    private void updatePlaylistUI() {
         ArrayList<String> names = new ArrayList<>();
-        for (MusicScanner.Song song : queueManager.getQueue()) {
+        for (SongRepository.Song song : queue) {
             names.add(song.title + " - " + song.artist);
         }
-        playlistAdapter = new ArrayAdapter<>(this, R.layout.list_item_song, names);
-        playlistView.setAdapter(playlistAdapter);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, R.layout.list_item_song, names);
+        playlistView.setAdapter(adapter);
     }
 
-    private void playCurrentSong() {
-        MusicScanner.Song song = playlistManager.getCurrentSong();
-        if (song == null) return;
-
-        playerCore.loadTrack(song.path);
-        playerCore.play();
+    private void playSong(SongRepository.Song song) {
+        playerController.loadTrack(song);
+        playerController.play();
 
         currentSongText.setText(song.title);
         artistText.setText(song.artist);
@@ -222,78 +183,74 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
             albumArtView.setImageResource(R.drawable.ic_music_placeholder);
         }
 
+        song.isFavorite = favoritesStore.isFavorite(song.path);
         favoriteButton.setImageResource(song.isFavorite ? R.drawable.ic_favorite_filled : R.drawable.ic_favorite);
 
-        int duration = playerCore.getDuration();
-        seekBar.setMax(Math.max(duration, 1));
-        totalTimeText.setText(formatTime(duration));
+        int duration = playerController.getDuration();
+        if (duration > 0) {
+            seekBar.setMax(duration);
+            totalTimeText.setText(formatTime(duration));
+        }
         currentTimeText.setText("00:00");
 
         handler.removeCallbacks(progressUpdater);
         handler.post(progressUpdater);
     }
 
-    private Bitmap getRoundedBitmap(Bitmap bitmap) {
-        Bitmap scaled = Bitmap.createScaledBitmap(bitmap, 280, 280, true);
+    public Bitmap getRoundedBitmap(Bitmap source) {
+        Bitmap scaled = Bitmap.createScaledBitmap(source, 280, 280, true);
         RoundedBitmapDrawable drawable = RoundedBitmapDrawableFactory.create(getResources(), scaled);
-        drawable.setCornerRadius(28f);
+        drawable.setCornerRadius(30f);
         return scaled;
     }
 
     private void togglePlayPause() {
-        if (playlistManager.getCurrentSong() == null) {
-            if (!queueManager.getQueue().isEmpty()) {
-                playCurrentSong();
-            }
-            return;
-        }
-
-        if (playerCore.isPlaying()) {
-            playerCore.pause();
+        if (playerController.isPlaying()) {
+            playerController.pause();
             playPauseButton.setImageResource(R.drawable.ic_play);
             handler.removeCallbacks(progressUpdater);
         } else {
-            playerCore.play();
+            playerController.play();
             playPauseButton.setImageResource(R.drawable.ic_pause);
             handler.post(progressUpdater);
         }
     }
 
     private void playNext() {
-        MusicScanner.Song nextSong = playlistManager.getNext();
-        if (nextSong != null) {
-            playCurrentSong();
+        if (queue.isEmpty()) return;
+        if (shuffleEnabled) {
+            currentIndex = (int) (Math.random() * queue.size());
+        } else {
+            currentIndex = (currentIndex + 1) % queue.size();
         }
+        playSong(queue.get(currentIndex));
     }
 
     private void playPrevious() {
-        MusicScanner.Song previousSong = playlistManager.getPrevious();
-        if (previousSong != null) {
-            playCurrentSong();
-        }
+        if (queue.isEmpty()) return;
+        currentIndex = (currentIndex - 1 + queue.size()) % queue.size();
+        playSong(queue.get(currentIndex));
     }
 
     private void toggleShuffle() {
-        boolean enabled = !playlistManager.isShuffleEnabled();
-        playlistManager.setShuffleEnabled(enabled);
-        shuffleButton.setColorFilter(enabled ? 0xFF6EE7B7 : 0xFFFFFFFF);
-        Toast.makeText(this, enabled ? "Shuffle on" : "Shuffle off", Toast.LENGTH_SHORT).show();
+        shuffleEnabled = !shuffleEnabled;
+        shuffleButton.setColorFilter(shuffleEnabled ? 0xFF6EE7B7 : 0xFFFFFFFF);
+        Toast.makeText(this, shuffleEnabled ? "Shuffle on" : "Shuffle off", Toast.LENGTH_SHORT).show();
     }
 
     private void toggleRepeat() {
-        boolean enabled = !playlistManager.isRepeatEnabled();
-        playlistManager.setRepeatEnabled(enabled);
-        repeatButton.setColorFilter(enabled ? 0xFF6EE7B7 : 0xFFFFFFFF);
-        Toast.makeText(this, enabled ? "Repeat on" : "Repeat off", Toast.LENGTH_SHORT).show();
+        repeatEnabled = !repeatEnabled;
+        repeatButton.setColorFilter(repeatEnabled ? 0xFF6EE7B7 : 0xFFFFFFFF);
+        Toast.makeText(this, repeatEnabled ? "Repeat on" : "Repeat off", Toast.LENGTH_SHORT).show();
     }
 
     private void toggleFavorite() {
-        MusicScanner.Song song = playlistManager.getCurrentSong();
-        if (song != null) {
-            favoritesManager.toggleFavorite(song);
-            favoriteButton.setImageResource(song.isFavorite ? R.drawable.ic_favorite_filled : R.drawable.ic_favorite);
-            Toast.makeText(this, song.isFavorite ? "Added to favorites" : "Removed from favorites", Toast.LENGTH_SHORT).show();
-        }
+        if (queue.isEmpty()) return;
+        SongRepository.Song song = queue.get(currentIndex);
+        favoritesStore.toggleFavorite(song.path);
+        song.isFavorite = favoritesStore.isFavorite(song.path);
+        favoriteButton.setImageResource(song.isFavorite ? R.drawable.ic_favorite_filled : R.drawable.ic_favorite);
+        Toast.makeText(this, song.isFavorite ? "Added to favorites" : "Removed from favorites", Toast.LENGTH_SHORT).show();
     }
 
     private String formatTime(int millis) {
@@ -303,47 +260,23 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
         return String.format(Locale.US, "%02d:%02d", minutes, seconds);
     }
 
-    private boolean hasStoragePermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO)
-                    == PackageManager.PERMISSION_GRANTED;
-        }
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-                == PackageManager.PERMISSION_GRANTED;
-    }
-
-    private void requestStoragePermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.READ_MEDIA_AUDIO}, REQ_STORAGE);
+    @Override
+    public void onPlaybackStateChanged(boolean isPlaying) {
+        playPauseButton.setImageResource(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play);
+        if (isPlaying) {
+            handler.post(progressUpdater);
         } else {
-            ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_STORAGE);
+            handler.removeCallbacks(progressUpdater);
         }
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
-                                           @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQ_STORAGE) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                loadMusicLibrary();
-            } else {
-                Toast.makeText(this, "Storage permission is required to play music.", Toast.LENGTH_LONG).show();
-            }
+    public void onTrackChanged(String title, String artist, Bitmap albumArt) {
+        currentSongText.setText(title);
+        artistText.setText(artist);
+        if (albumArt != null) {
+            albumArtView.setImageBitmap(getRoundedBitmap(albumArt));
         }
-    }
-
-    @Override
-    public void onStateChanged(MusicPlayerCore.PlayerState state) {
-        Log.d(TAG, "Player state: " + state);
-    }
-
-    @Override
-    public void onDurationChanged(int duration) {
-        seekBar.setMax(duration);
-        totalTimeText.setText(formatTime(duration));
     }
 
     @Override
@@ -355,17 +288,11 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
     }
 
     @Override
-    public void onError(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-        Log.e(TAG, message);
-    }
-
-    @Override
     protected void onDestroy() {
         super.onDestroy();
         handler.removeCallbacks(progressUpdater);
-        if (playerCore != null) {
-            playerCore.release();
+        if (playerController != null) {
+            playerController.unbind();
         }
     }
 }

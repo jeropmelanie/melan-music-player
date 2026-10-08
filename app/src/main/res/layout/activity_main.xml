@@ -17,10 +17,10 @@
             android:id="@+id/currentSongText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:ellipsize="marquee"
             android:gravity="center"
-            android:marqueeRepeatLimit="marquee_forever"
             android:singleLine="true"
+            android:ellipsize="marquee"
+            android:marqueeRepeatLimit="marquee_forever"
             android:text="No Track"
             android:textColor="#F5F5F5"
             android:textSize="24sp"
@@ -30,8 +30,8 @@
             android:id="@+id/artistText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
             android:gravity="center"
+            android:layout_marginTop="6dp"
             android:text="Unknown Artist"
             android:textColor="#D5D5D5"
             android:textSize="13sp" />
@@ -47,9 +47,9 @@
             android:id="@+id/albumArtView"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:contentDescription="Album Art"
-            android:padding="20dp"
-            android:scaleType="centerInside" />
+            android:contentDescription="Album art"
+            android:scaleType="centerInside"
+            android:padding="20dp" />
     </FrameLayout>
 
     <LinearLayout
