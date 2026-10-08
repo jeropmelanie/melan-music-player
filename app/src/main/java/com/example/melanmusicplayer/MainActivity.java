@@ -1,9 +1,14 @@
 package com.example.melanmusicplayer;
 
-import android.graphics.Bitmap;
-import android.graphics.Color;
+import android.Manifest;
+import android.content.ComponentName;
+import android.content.Intent;
+import android.content.ServiceConnection;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
 import android.widget.ArrayAdapter;
 import android.widget.ImageButton;
@@ -14,43 +19,41 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.graphics.drawable.RoundedBitmapDrawable;
-import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
 
-import com.example.melanmusicplayer.player.PlayerController;
-import com.example.melanmusicplayer.repository.SongRepository;
+import com.example.melanmusicplayer.model.PlaybackState;
+import com.example.melanmusicplayer.model.Queue;
+import com.example.melanmusicplayer.model.Song;
 import com.example.melanmusicplayer.service.MusicService;
-import com.example.melanmusicplayer.util.FavoritesStore;
-import com.example.melanmusicplayer.util.QueueStore;
+import com.example.melanmusicplayer.util.AudioScanner;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
-public class MainActivity extends AppCompatActivity implements MusicService.PlaybackListener {
+public class MainActivity extends AppCompatActivity implements MusicService.MusicServiceListener {
+
+    private static final int REQ_AUDIO_PERMISSION = 1001;
+
+    private MusicService musicService;
+    private boolean isBound = false;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable progressUpdater = new Runnable() {
         @Override
         public void run() {
-            if (playerController != null && playerController.isPlaying()) {
-                int pos = playerController.getCurrentPosition();
+            if (musicService != null && musicService.getPlaybackState() != null && musicService.getPlaybackState().isPlaying()) {
+                long pos = musicService.getCurrentPosition();
                 if (!isUserSeeking) {
-                    seekBar.setProgress(pos);
+                    seekBar.setProgress((int) pos);
                     currentTimeText.setText(formatTime(pos));
                 }
                 handler.postDelayed(this, 500);
             }
         }
     };
-
-    private PlayerController playerController;
-    private SongRepository songRepository;
-    private FavoritesStore favoritesStore;
-    private QueueStore queueStore;
-    private ArrayList<SongRepository.Song> songs = new ArrayList<>();
-    private ArrayList<SongRepository.Song> queue = new ArrayList<>();
-    private int currentIndex = 0;
 
     private ListView playlistView;
     private SeekBar seekBar;
@@ -67,9 +70,33 @@ public class MainActivity extends AppCompatActivity implements MusicService.Play
     private ImageButton repeatButton;
     private ImageButton favoriteButton;
 
+    private ArrayAdapter<String> songAdapter;
+    private final ArrayList<String> songLabels = new ArrayList<>();
+    private final ArrayList<Song> songs = new ArrayList<>();
+    private int currentIndex = 0;
     private boolean isUserSeeking = false;
     private boolean shuffleEnabled = false;
     private boolean repeatEnabled = false;
+
+    private final ServiceConnection serviceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            MusicService.MusicBinder binder = (MusicService.MusicBinder) service;
+            musicService = binder.getService();
+            isBound = true;
+            musicService.setListener(MainActivity.this);
+
+            if (!songs.isEmpty()) {
+                musicService.setQueue(new Queue(new ArrayList<>(songs)));
+            }
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            isBound = false;
+            musicService = null;
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -77,31 +104,20 @@ public class MainActivity extends AppCompatActivity implements MusicService.Play
         setContentView(R.layout.activity_main);
 
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-        getWindow().setStatusBarColor(Color.TRANSPARENT);
-        getWindow().setNavigationBarColor(Color.TRANSPARENT);
-
-        playerController = new PlayerController(this);
-        songRepository = new SongRepository(this);
-        favoritesStore = new FavoritesStore(this);
-        queueStore = new QueueStore(this);
 
         bindViews();
         setupListeners();
-        playerController.setPlaybackListener(this);
+        setupAdapter();
 
-        new Thread(() -> {
-            songs = songRepository.getAllSongs();
-            runOnUiThread(() -> {
-                if (songs.isEmpty()) {
-                    Toast.makeText(this, "No songs found in your music library.", Toast.LENGTH_LONG).show();
-                    return;
-                }
-                queue.clear();
-                queue.addAll(songs);
-                updatePlaylistUI();
-                playSong(queue.get(0));
-            });
-        }).start();
+        if (hasAudioPermission()) {
+            loadSongs();
+        } else {
+            requestAudioPermission();
+        }
+
+        Intent serviceIntent = new Intent(this, MusicService.class);
+        bindService(serviceIntent, serviceConnection, BIND_AUTO_CREATE);
+        startService(serviceIntent);
     }
 
     private void bindViews() {
@@ -122,6 +138,12 @@ public class MainActivity extends AppCompatActivity implements MusicService.Play
 
         volumeSlider.setMax(15);
         volumeSlider.setProgress(10);
+        albumArtView.setImageResource(R.drawable.ic_music_placeholder);
+    }
+
+    private void setupAdapter() {
+        songAdapter = new ArrayAdapter<>(this, R.layout.list_item_song, android.R.id.text1, songLabels);
+        playlistView.setAdapter(songAdapter);
     }
 
     private void setupListeners() {
@@ -135,8 +157,8 @@ public class MainActivity extends AppCompatActivity implements MusicService.Play
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser) {
-                    playerController.seek(progress);
+                if (fromUser && musicService != null) {
+                    musicService.seekTo(progress);
                     currentTimeText.setText(formatTime(progress));
                 }
             }
@@ -146,90 +168,155 @@ public class MainActivity extends AppCompatActivity implements MusicService.Play
         });
 
         volumeSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                float volume = progress / 15f;
-                playerController.setVolume(volume);
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (musicService != null) {
+                    musicService.setVolume(progress / 15f);
+                }
             }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { }
         });
 
         playlistView.setOnItemClickListener((parent, view, position, id) -> {
-            currentIndex = position;
-            playSong(queue.get(position));
+            if (position >= 0 && position < songs.size()) {
+                playSongAt(position);
+            }
         });
     }
 
-    private void updatePlaylistUI() {
-        ArrayList<String> names = new ArrayList<>();
-        for (SongRepository.Song song : queue) {
-            names.add(song.title + " - " + song.artist);
-        }
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, R.layout.list_item_song, names);
-        playlistView.setAdapter(adapter);
+    private boolean hasAudioPermission() {
+        String permission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                ? Manifest.permission.READ_MEDIA_AUDIO
+                : Manifest.permission.READ_EXTERNAL_STORAGE;
+
+        return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED;
     }
 
-    private void playSong(SongRepository.Song song) {
-        playerController.loadTrack(song);
-        playerController.play();
+    private void requestAudioPermission() {
+        String permission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                ? Manifest.permission.READ_MEDIA_AUDIO
+                : Manifest.permission.READ_EXTERNAL_STORAGE;
 
-        currentSongText.setText(song.title);
-        artistText.setText(song.artist);
-        playPauseButton.setImageResource(R.drawable.ic_pause);
+        ActivityCompat.requestPermissions(this, new String[]{permission}, REQ_AUDIO_PERMISSION);
+    }
 
-        if (song.albumArt != null) {
-            albumArtView.setImageBitmap(getRoundedBitmap(song.albumArt));
-        } else {
-            albumArtView.setImageResource(R.drawable.ic_music_placeholder);
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_AUDIO_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                loadSongs();
+            } else {
+                Toast.makeText(this, "Audio permission is required to load songs", Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private void loadSongs() {
+        new Thread(() -> {
+            List<Song> scanned = new AudioScanner(this).getAllSongs();
+            runOnUiThread(() -> {
+                songs.clear();
+                songs.addAll(scanned);
+                refreshSongList();
+
+                if (!songs.isEmpty()) {
+                    Queue queue = new Queue(new ArrayList<>(songs));
+                    if (musicService != null) {
+                        musicService.setQueue(queue);
+                    }
+                    playSongAt(0);
+                } else {
+                    Toast.makeText(this, "No songs found", Toast.LENGTH_LONG).show();
+                    currentSongText.setText("No Track");
+                    artistText.setText("Unknown Artist");
+                }
+            });
+        }).start();
+    }
+
+    private void refreshSongList() {
+        songLabels.clear();
+        for (Song song : songs) {
+            songLabels.add(song.getTitle() + " - " + song.getArtist());
+        }
+        if (songAdapter != null) {
+            songAdapter.notifyDataSetChanged();
+        }
+    }
+
+    private void playSongAt(int position) {
+        if (position < 0 || position >= songs.size()) {
+            return;
         }
 
-        song.isFavorite = favoritesStore.isFavorite(song.path);
-        favoriteButton.setImageResource(song.isFavorite ? R.drawable.ic_favorite_filled : R.drawable.ic_favorite);
+        currentIndex = position;
+        Song selected = songs.get(position);
 
-        int duration = playerController.getDuration();
-        if (duration > 0) {
-            seekBar.setMax(duration);
-            totalTimeText.setText(formatTime(duration));
+        if (musicService != null) {
+            Queue queue = new Queue(new ArrayList<>(songs));
+            musicService.setQueue(queue);
+            musicService.loadSong(selected);
+            musicService.play();
         }
+
+        updateNowPlaying(selected);
+    }
+
+    private void updateNowPlaying(Song song) {
+        if (song == null) {
+            return;
+        }
+
+        currentSongText.setText(song.getTitle());
+        artistText.setText(song.getArtist());
+        seekBar.setMax((int) song.getDuration());
+        totalTimeText.setText(formatTime(song.getDuration()));
         currentTimeText.setText("00:00");
+        albumArtView.setImageResource(R.drawable.ic_music_placeholder);
 
-        handler.removeCallbacks(progressUpdater);
-        handler.post(progressUpdater);
-    }
-
-    public Bitmap getRoundedBitmap(Bitmap source) {
-        Bitmap scaled = Bitmap.createScaledBitmap(source, 280, 280, true);
-        RoundedBitmapDrawable drawable = RoundedBitmapDrawableFactory.create(getResources(), scaled);
-        drawable.setCornerRadius(30f);
-        return scaled;
+        if (musicService != null && musicService.getPlaybackState() != null) {
+            playPauseButton.setImageResource(musicService.getPlaybackState().isPlaying() ? R.drawable.ic_pause : R.drawable.ic_play);
+        } else {
+            playPauseButton.setImageResource(R.drawable.ic_play);
+        }
     }
 
     private void togglePlayPause() {
-        if (playerController.isPlaying()) {
-            playerController.pause();
-            playPauseButton.setImageResource(R.drawable.ic_play);
-            handler.removeCallbacks(progressUpdater);
+        if (musicService == null || songs.isEmpty()) {
+            Toast.makeText(this, "No audio loaded", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (musicService.getPlaybackState() != null && musicService.getPlaybackState().isPlaying()) {
+            musicService.pause();
         } else {
-            playerController.play();
-            playPauseButton.setImageResource(R.drawable.ic_pause);
-            handler.post(progressUpdater);
+            if (musicService.getCurrentSong() == null) {
+                playSongAt(currentIndex);
+            } else {
+                musicService.play();
+            }
         }
     }
 
     private void playNext() {
-        if (queue.isEmpty()) return;
-        if (shuffleEnabled) {
-            currentIndex = (int) (Math.random() * queue.size());
-        } else {
-            currentIndex = (currentIndex + 1) % queue.size();
-        }
-        playSong(queue.get(currentIndex));
+        if (songs.isEmpty()) return;
+        int nextIndex = shuffleEnabled ? randomIndex() : (currentIndex + 1) % songs.size();
+        currentIndex = nextIndex;
+        playSongAt(currentIndex);
     }
 
     private void playPrevious() {
-        if (queue.isEmpty()) return;
-        currentIndex = (currentIndex - 1 + queue.size()) % queue.size();
-        playSong(queue.get(currentIndex));
+        if (songs.isEmpty()) return;
+        int previousIndex = (currentIndex - 1 + songs.size()) % songs.size();
+        currentIndex = previousIndex;
+        playSongAt(currentIndex);
+    }
+
+    private int randomIndex() {
+        return (int) (Math.random() * songs.size());
     }
 
     private void toggleShuffle() {
@@ -241,58 +328,76 @@ public class MainActivity extends AppCompatActivity implements MusicService.Play
     private void toggleRepeat() {
         repeatEnabled = !repeatEnabled;
         repeatButton.setColorFilter(repeatEnabled ? 0xFF6EE7B7 : 0xFFFFFFFF);
+
+        if (musicService != null) {
+            musicService.setRepeatMode(repeatEnabled ? PlaybackState.RepeatMode.ALL : PlaybackState.RepeatMode.NONE);
+        }
+
         Toast.makeText(this, repeatEnabled ? "Repeat on" : "Repeat off", Toast.LENGTH_SHORT).show();
     }
 
     private void toggleFavorite() {
-        if (queue.isEmpty()) return;
-        SongRepository.Song song = queue.get(currentIndex);
-        favoritesStore.toggleFavorite(song.path);
-        song.isFavorite = favoritesStore.isFavorite(song.path);
-        favoriteButton.setImageResource(song.isFavorite ? R.drawable.ic_favorite_filled : R.drawable.ic_favorite);
-        Toast.makeText(this, song.isFavorite ? "Added to favorites" : "Removed from favorites", Toast.LENGTH_SHORT).show();
+        if (currentIndex < 0 || currentIndex >= songs.size()) return;
+
+        Song song = songs.get(currentIndex);
+        song.setFavorite(!song.isFavorite());
+        favoriteButton.setImageResource(song.isFavorite() ? R.drawable.ic_favorite_filled : R.drawable.ic_favorite);
+        Toast.makeText(this, song.isFavorite() ? "Added to favorites" : "Removed from favorites", Toast.LENGTH_SHORT).show();
     }
 
-    private String formatTime(int millis) {
-        int totalSeconds = millis / 1000;
-        int minutes = totalSeconds / 60;
-        int seconds = totalSeconds % 60;
+    private String formatTime(long millis) {
+        long totalSeconds = millis / 1000;
+        long minutes = totalSeconds / 60;
+        long seconds = totalSeconds % 60;
         return String.format(Locale.US, "%02d:%02d", minutes, seconds);
     }
 
     @Override
-    public void onPlaybackStateChanged(boolean isPlaying) {
-        playPauseButton.setImageResource(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play);
-        if (isPlaying) {
+    public void onPlaybackStateChanged(PlaybackState state) {
+        if (state == null) return;
+
+        playPauseButton.setImageResource(state.isPlaying() ? R.drawable.ic_pause : R.drawable.ic_play);
+        if (state.isPlaying()) {
             handler.post(progressUpdater);
         } else {
             handler.removeCallbacks(progressUpdater);
         }
-    }
 
-    @Override
-    public void onTrackChanged(String title, String artist, Bitmap albumArt) {
-        currentSongText.setText(title);
-        artistText.setText(artist);
-        if (albumArt != null) {
-            albumArtView.setImageBitmap(getRoundedBitmap(albumArt));
+        if (state.getDuration() > 0) {
+            seekBar.setMax((int) state.getDuration());
+            totalTimeText.setText(formatTime(state.getDuration()));
         }
     }
 
     @Override
-    public void onPositionChanged(int position) {
+    public void onSongChanged(Song song) {
+        if (song != null) {
+            updateNowPlaying(song);
+        }
+    }
+
+    @Override
+    public void onPositionChanged(long position) {
         if (!isUserSeeking) {
-            seekBar.setProgress(position);
+            seekBar.setProgress((int) position);
             currentTimeText.setText(formatTime(position));
         }
+    }
+
+    @Override
+    public void onError(String error) {
+        Toast.makeText(this, error != null ? error : "Playback error", Toast.LENGTH_SHORT).show();
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
         handler.removeCallbacks(progressUpdater);
-        if (playerController != null) {
-            playerController.unbind();
+
+        if (isBound && musicService != null) {
+            musicService.setListener(null);
+            unbindService(serviceConnection);
+            isBound = false;
         }
     }
 }
