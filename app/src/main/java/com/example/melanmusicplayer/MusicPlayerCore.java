@@ -29,6 +29,10 @@ public class MusicPlayerCore {
         this.listener = listener;
     }
 
+    public void setOnCompletionListener(MediaPlayer.OnCompletionListener onCompletionListener) {
+        mediaPlayer.setOnCompletionListener(onCompletionListener);
+    }
+
     public void loadTrack(String path) {
         try {
             if (mediaPlayer.isPlaying()) {
@@ -97,10 +101,6 @@ public class MusicPlayerCore {
 
     public boolean isPlaying() {
         return mediaPlayer.isPlaying();
-    }
-
-    public void setOnCompletionListener(MediaPlayer.OnCompletionListener listener) {
-        mediaPlayer.setOnCompletionListener(listener);
     }
 
     public void release() {

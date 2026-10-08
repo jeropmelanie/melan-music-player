@@ -33,7 +33,7 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
     private final Runnable progressUpdater = new Runnable() {
         @Override
         public void run() {
-            if (playerCore.isPlaying()) {
+            if (playerCore != null && playerCore.isPlaying()) {
                 int pos = playerCore.getCurrentPosition();
                 if (!isUserSeeking) {
                     seekBar.setProgress(pos);
@@ -79,6 +79,7 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
 
         bindViews();
         setupListeners();
+        attachCompletionListener();
 
         if (hasStoragePermission()) {
             loadMusicLibrary();
@@ -99,6 +100,26 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
         nextButton = findViewById(R.id.nextButton);
         shuffleButton = findViewById(R.id.shuffleButton);
         repeatButton = findViewById(R.id.repeatButton);
+    }
+
+    private void attachCompletionListener() {
+        playerCore.setOnCompletionListener(mp -> {
+            if (playlistManager.isRepeatEnabled()) {
+                playCurrentSong();
+                return;
+            }
+
+            if (playlistManager.getPlaylist().isEmpty()) {
+                playerCore.pause();
+                playPauseButton.setImageResource(R.drawable.ic_play);
+                return;
+            }
+
+            MusicScanner.Song nextSong = playlistManager.getNext();
+            if (nextSong != null) {
+                playCurrentSong();
+            }
+        });
     }
 
     private void setupListeners() {
@@ -163,8 +184,9 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
         artistText.setText("Melan Music");
         playPauseButton.setImageResource(R.drawable.ic_pause);
 
-        seekBar.setMax(playerCore.getDuration());
-        totalTimeText.setText(formatTime(playerCore.getDuration()));
+        int duration = playerCore.getDuration();
+        seekBar.setMax(Math.max(duration, 1));
+        totalTimeText.setText(formatTime(duration));
         currentTimeText.setText("00:00");
 
         handler.removeCallbacks(progressUpdater);
@@ -172,16 +194,21 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
     }
 
     private void togglePlayPause() {
+        if (playlistManager.getCurrentSong() == null) {
+            if (!playlistManager.getPlaylist().isEmpty()) {
+                playCurrentSong();
+            }
+            return;
+        }
+
         if (playerCore.isPlaying()) {
             playerCore.pause();
             playPauseButton.setImageResource(R.drawable.ic_play);
             handler.removeCallbacks(progressUpdater);
         } else {
-            if (playlistManager.getCurrentSong() != null) {
-                playerCore.play();
-                playPauseButton.setImageResource(R.drawable.ic_pause);
-                handler.post(progressUpdater);
-            }
+            playerCore.play();
+            playPauseButton.setImageResource(R.drawable.ic_pause);
+            handler.post(progressUpdater);
         }
     }
 
@@ -281,6 +308,8 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
     protected void onDestroy() {
         super.onDestroy();
         handler.removeCallbacks(progressUpdater);
-        playerCore.release();
+        if (playerCore != null) {
+            playerCore.release();
+        }
     }
 }
