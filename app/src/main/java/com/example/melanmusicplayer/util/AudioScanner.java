@@ -20,35 +20,21 @@ import java.util.List;
 public class AudioScanner {
     private static final String TAG = "AudioScanner";
 
-    // Audio file MIME types supported
-    private static final String[] AUDIO_MIME_TYPES = {
-            "audio/mpeg",           // MP3
-            "audio/ogg",            // OGG
-            "audio/flac",           // FLAC
-            "audio/wav",            // WAV
-            "audio/aac",            // AAC
-            "audio/mp4",            // M4A
-            "audio/x-m4a"           // M4A variant
-    };
-
-    private Context context;
-    private ContentResolver contentResolver;
+    private final Context context;
+    private final ContentResolver contentResolver;
 
     public AudioScanner(Context context) {
         this.context = context;
         this.contentResolver = context.getContentResolver();
     }
 
-    /**
-     * Scan device for audio files and return list of songs.
-     */
     public List<Song> scanAudio() {
         List<Song> songs = new ArrayList<>();
         Log.d(TAG, "Starting audio scan...");
 
         try {
             Uri uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
-            
+
             String[] projection = {
                     MediaStore.Audio.Media._ID,
                     MediaStore.Audio.Media.TITLE,
@@ -56,12 +42,12 @@ public class AudioScanner {
                     MediaStore.Audio.Media.ALBUM,
                     MediaStore.Audio.Media.ALBUM_ID,
                     MediaStore.Audio.Media.ARTIST_ID,
-                    MediaStore.Audio.Media.DATA,           // File path
+                    MediaStore.Audio.Media.DATA,
                     MediaStore.Audio.Media.DURATION,
                     MediaStore.Audio.Media.DATE_ADDED,
                     MediaStore.Audio.Media.DATE_MODIFIED,
                     MediaStore.Audio.Media.MIME_TYPE,
-                    MediaStore.Audio.Media.SIZE,           // File size in bytes
+                    MediaStore.Audio.Media.SIZE,
                     MediaStore.Audio.Media.TRACK
             };
 
@@ -102,8 +88,8 @@ public class AudioScanner {
                         song.setArtistId(cursor.getLong(artistIdColumn));
                         song.setFilePath(cursor.getString(dataColumn));
                         song.setDuration(cursor.getLong(durationColumn));
-                        song.setDateAdded(cursor.getLong(dateAddedColumn) * 1000); // Convert to ms
-                        song.setDateModified(cursor.getLong(dateModifiedColumn) * 1000);
+                        song.setDateAdded(cursor.getLong(dateAddedColumn) * 1000L);
+                        song.setDateModified(cursor.getLong(dateModifiedColumn) * 1000L);
                         song.setMimeType(cursor.getString(mimeTypeColumn));
                         song.setFileSize(cursor.getLong(sizeColumn));
                         song.setTrackNumber(cursor.getInt(trackColumn));
@@ -127,46 +113,14 @@ public class AudioScanner {
         return songs;
     }
 
-    /**
-     * Get all songs sorted by title
-     */
     public List<Song> getAllSongs() {
         List<Song> songs = scanAudio();
         Collections.sort(songs);
         return songs;
     }
 
-    /**
-     * Get all songs sorted by artist
-     */
-    public List<Song> getAllSongsByArtist() {
-        List<Song> songs = scanAudio();
-        Collections.sort(songs, (a, b) -> {
-            int artistComparison = a.getArtist().compareToIgnoreCase(b.getArtist());
-            if (artistComparison != 0) return artistComparison;
-            return a.getTitle().compareToIgnoreCase(b.getTitle());
-        });
-        return songs;
-    }
-
-    /**
-     * Get all songs sorted by album
-     */
-    public List<Song> getAllSongsByAlbum() {
-        List<Song> songs = scanAudio();
-        Collections.sort(songs, (a, b) -> {
-            int albumComparison = a.getAlbum().compareToIgnoreCase(b.getAlbum());
-            if (albumComparison != 0) return albumComparison;
-            return a.getTitle().compareToIgnoreCase(b.getTitle());
-        });
-        return songs;
-    }
-
-    /**
-     * Search songs by query
-     */
     public List<Song> search(String query) {
-        if (query == null || query.isEmpty()) {
+        if (query == null || query.trim().isEmpty()) {
             return new ArrayList<>();
         }
 
@@ -175,56 +129,14 @@ public class AudioScanner {
         String lowerQuery = query.toLowerCase();
 
         for (Song song : allSongs) {
-            if (song.getTitle().toLowerCase().contains(lowerQuery) ||
-                    song.getArtist().toLowerCase().contains(lowerQuery) ||
-                    song.getAlbum().toLowerCase().contains(lowerQuery)) {
+            if (song.getTitle() != null && song.getTitle().toLowerCase().contains(lowerQuery)
+                    || song.getArtist() != null && song.getArtist().toLowerCase().contains(lowerQuery)
+                    || song.getAlbum() != null && song.getAlbum().toLowerCase().contains(lowerQuery)) {
                 results.add(song);
             }
         }
 
         Log.d(TAG, "Search for '" + query + "' found " + results.size() + " songs");
-        return results;
-    }
-
-    /**
-     * Get songs by artist
-     */
-    public List<Song> getSongsByArtist(String artist) {
-        if (artist == null || artist.isEmpty()) {
-            return new ArrayList<>();
-        }
-
-        List<Song> allSongs = scanAudio();
-        List<Song> results = new ArrayList<>();
-
-        for (Song song : allSongs) {
-            if (song.getArtist().equalsIgnoreCase(artist)) {
-                results.add(song);
-            }
-        }
-
-        Log.d(TAG, "Found " + results.size() + " songs by " + artist);
-        return results;
-    }
-
-    /**
-     * Get songs by album
-     */
-    public List<Song> getSongsByAlbum(String album) {
-        if (album == null || album.isEmpty()) {
-            return new ArrayList<>();
-        }
-
-        List<Song> allSongs = scanAudio();
-        List<Song> results = new ArrayList<>();
-
-        for (Song song : allSongs) {
-            if (song.getAlbum().equalsIgnoreCase(album)) {
-                results.add(song);
-            }
-        }
-
-        Log.d(TAG, "Found " + results.size() + " songs in album " + album);
         return results;
     }
 }
