@@ -33,6 +33,10 @@ public class MusicPlayerCore {
         mediaPlayer.setOnCompletionListener(onCompletionListener);
     }
 
+    public void setVolume(float leftVolume, float rightVolume) {
+        mediaPlayer.setVolume(leftVolume, rightVolume);
+    }
+
     public void loadTrack(String path) {
         try {
             if (mediaPlayer.isPlaying()) {

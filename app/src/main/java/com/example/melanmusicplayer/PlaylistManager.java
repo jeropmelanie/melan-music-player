@@ -49,6 +49,10 @@ public class PlaylistManager {
         }
     }
 
+    public int getCurrentIndex() {
+        return currentIndex;
+    }
+
     public ArrayList<MusicScanner.Song> getPlaylist() {
         return playlist;
     }

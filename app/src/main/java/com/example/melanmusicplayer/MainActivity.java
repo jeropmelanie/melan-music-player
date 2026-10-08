@@ -2,6 +2,7 @@ package com.example.melanmusicplayer;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -10,6 +11,7 @@ import android.os.Looper;
 import android.util.Log;
 import android.widget.ArrayAdapter;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -19,6 +21,8 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.drawable.RoundedBitmapDrawable;
+import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory;
 import androidx.core.view.WindowCompat;
 
 import java.util.ArrayList;
@@ -46,19 +50,24 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
 
     private MusicPlayerCore playerCore;
     private PlaylistManager playlistManager;
+    private QueueManager queueManager;
+    private FavoritesManager favoritesManager;
     private MusicScanner scanner;
 
     private ListView playlistView;
     private SeekBar seekBar;
+    private SeekBar volumeSlider;
     private TextView currentSongText;
     private TextView artistText;
     private TextView currentTimeText;
     private TextView totalTimeText;
+    private ImageView albumArtView;
     private ImageButton prevButton;
     private ImageButton playPauseButton;
     private ImageButton nextButton;
     private ImageButton shuffleButton;
     private ImageButton repeatButton;
+    private ImageButton favoriteButton;
 
     private ArrayAdapter<String> playlistAdapter;
     private boolean isUserSeeking = false;
@@ -75,6 +84,8 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
         playerCore = new MusicPlayerCore();
         playerCore.setListener(this);
         playlistManager = new PlaylistManager();
+        queueManager = new QueueManager();
+        favoritesManager = new FavoritesManager();
         scanner = new MusicScanner(this);
 
         bindViews();
@@ -91,15 +102,21 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
     private void bindViews() {
         playlistView = findViewById(R.id.playlistView);
         seekBar = findViewById(R.id.seekBar);
+        volumeSlider = findViewById(R.id.volumeSlider);
         currentSongText = findViewById(R.id.currentSongText);
         artistText = findViewById(R.id.artistText);
         currentTimeText = findViewById(R.id.currentTimeText);
         totalTimeText = findViewById(R.id.totalTimeText);
+        albumArtView = findViewById(R.id.albumArtView);
         prevButton = findViewById(R.id.prevButton);
         playPauseButton = findViewById(R.id.playPauseButton);
         nextButton = findViewById(R.id.nextButton);
         shuffleButton = findViewById(R.id.shuffleButton);
         repeatButton = findViewById(R.id.repeatButton);
+        favoriteButton = findViewById(R.id.favoriteButton);
+
+        volumeSlider.setMax(15);
+        volumeSlider.setProgress(10);
     }
 
     private void attachCompletionListener() {
@@ -109,7 +126,7 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
                 return;
             }
 
-            if (playlistManager.getPlaylist().isEmpty()) {
+            if (queueManager.getQueue().isEmpty()) {
                 playerCore.pause();
                 playPauseButton.setImageResource(R.drawable.ic_play);
                 return;
@@ -128,6 +145,7 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
         prevButton.setOnClickListener(v -> playPrevious());
         shuffleButton.setOnClickListener(v -> toggleShuffle());
         repeatButton.setOnClickListener(v -> toggleRepeat());
+        favoriteButton.setOnClickListener(v -> toggleFavorite());
 
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -140,6 +158,19 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
 
             @Override public void onStartTrackingTouch(SeekBar seekBar) { isUserSeeking = true; }
             @Override public void onStopTrackingTouch(SeekBar seekBar) { isUserSeeking = false; }
+        });
+
+        volumeSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (playerCore != null) {
+                    float volume = progress / 15f;
+                    playerCore.setVolume(volume, volume);
+                }
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
 
         playlistView.setOnItemClickListener((parent, view, position, id) -> {
@@ -158,6 +189,7 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
                 }
 
                 playlistManager.setPlaylist(songs);
+                queueManager.setQueue(songs);
                 updatePlaylistList();
                 playCurrentSong();
             });
@@ -166,8 +198,8 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
 
     private void updatePlaylistList() {
         ArrayList<String> names = new ArrayList<>();
-        for (MusicScanner.Song song : playlistManager.getPlaylist()) {
-            names.add(song.title);
+        for (MusicScanner.Song song : queueManager.getQueue()) {
+            names.add(song.title + " - " + song.artist);
         }
         playlistAdapter = new ArrayAdapter<>(this, R.layout.list_item_song, names);
         playlistView.setAdapter(playlistAdapter);
@@ -181,8 +213,16 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
         playerCore.play();
 
         currentSongText.setText(song.title);
-        artistText.setText("Melan Music");
+        artistText.setText(song.artist);
         playPauseButton.setImageResource(R.drawable.ic_pause);
+
+        if (song.albumArt != null) {
+            albumArtView.setImageBitmap(getRoundedBitmap(song.albumArt));
+        } else {
+            albumArtView.setImageResource(R.drawable.ic_music_placeholder);
+        }
+
+        favoriteButton.setImageResource(song.isFavorite ? R.drawable.ic_favorite_filled : R.drawable.ic_favorite);
 
         int duration = playerCore.getDuration();
         seekBar.setMax(Math.max(duration, 1));
@@ -193,9 +233,16 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
         handler.post(progressUpdater);
     }
 
+    private Bitmap getRoundedBitmap(Bitmap bitmap) {
+        Bitmap scaled = Bitmap.createScaledBitmap(bitmap, 280, 280, true);
+        RoundedBitmapDrawable drawable = RoundedBitmapDrawableFactory.create(getResources(), scaled);
+        drawable.setCornerRadius(28f);
+        return scaled;
+    }
+
     private void togglePlayPause() {
         if (playlistManager.getCurrentSong() == null) {
-            if (!playlistManager.getPlaylist().isEmpty()) {
+            if (!queueManager.getQueue().isEmpty()) {
                 playCurrentSong();
             }
             return;
@@ -238,6 +285,15 @@ public class MainActivity extends AppCompatActivity implements MusicPlayerCore.P
         playlistManager.setRepeatEnabled(enabled);
         repeatButton.setColorFilter(enabled ? 0xFF6EE7B7 : 0xFFFFFFFF);
         Toast.makeText(this, enabled ? "Repeat on" : "Repeat off", Toast.LENGTH_SHORT).show();
+    }
+
+    private void toggleFavorite() {
+        MusicScanner.Song song = playlistManager.getCurrentSong();
+        if (song != null) {
+            favoritesManager.toggleFavorite(song);
+            favoriteButton.setImageResource(song.isFavorite ? R.drawable.ic_favorite_filled : R.drawable.ic_favorite);
+            Toast.makeText(this, song.isFavorite ? "Added to favorites" : "Removed from favorites", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private String formatTime(int millis) {
